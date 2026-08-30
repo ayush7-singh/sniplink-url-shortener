@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   # ── Stage 1: Automated Testing of Microservices ──
   test-microservices:
@@ -73,21 +77,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
-
-      - name: Install Kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: v1.29.0
-
       - name: Lint Helm Chart
         run: helm lint helm/sniplink
 
       - name: Validate Declarative Manifests with Kustomize
-        run: kubectl kustomize k8s/ > /dev/null
+        run: kubectl kustomize k8s/
 
   # ── Stage 4: Container Build & Layer Caching ──
   docker-build:
@@ -99,13 +93,13 @@ jobs:
         include:
           - component: shortener
             context: ./services/shortener
-            image: sniplink-shortener
+            file: ./services/shortener/Dockerfile
           - component: analytics
             context: ./services/analytics
-            image: sniplink-analytics
+            file: ./services/analytics/Dockerfile
           - component: frontend
             context: ./frontend
-            image: sniplink-frontend
+            file: ./frontend/Dockerfile
 
     steps:
       - name: Checkout Code
@@ -115,13 +109,11 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: false
-          tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/${{ matrix.image }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -135,11 +127,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
-
       - name: Package Helm Chart
         run: |
           mkdir -p dist-helm
@@ -150,3 +137,4 @@ jobs:
         with:
           name: sniplink-helm-chart
           path: dist-helm/*.tgz
+
