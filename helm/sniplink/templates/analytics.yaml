@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sniplink.fullname" . }}-analytics
+  labels:
+    {{- include "sniplink.labels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics
+spec:
+  {{- if not .Values.analytics.autoscaling.enabled }}
+  replicas: {{ .Values.analytics.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sniplink.name" . }}-analytics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "sniplink.name" . }}-analytics
+        app.kubernetes.io/component: analytics
+    spec:
+      containers:
+        - name: analytics
+          image: "{{ .Values.analytics.image.repository }}:{{ .Values.analytics.image.tag }}"
+          imagePullPolicy: {{ .Values.analytics.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.analytics.service.port }}
+              name: http
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-config
+                  key: PORT_ANALYTICS
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-secrets
+                  key: DATABASE_URL
+            - name: PGHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-config
+                  key: PGHOST
+            - name: PGPORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-config
+                  key: PGPORT
+            - name: PGDATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-config
+                  key: PGDATABASE
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-secrets
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-secrets
+                  key: POSTGRES_PASSWORD
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sniplink.fullname" . }}-secrets
+                  key: RABBITMQ_URL
+          resources:
+            {{- toYaml .Values.analytics.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.analytics.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.analytics.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sniplink.fullname" . }}-analytics
+  labels:
+    {{- include "sniplink.labels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics
+spec:
+  type: {{ .Values.analytics.service.type }}
+  ports:
+    - port: {{ .Values.analytics.service.port }}
+      targetPort: {{ .Values.analytics.service.port }}
+      name: http
+  selector:
+    app.kubernetes.io/name: {{ include "sniplink.name" . }}-analytics
+{{- if .Values.analytics.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "sniplink.fullname" . }}-analytics
+  labels:
+    {{- include "sniplink.labels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "sniplink.fullname" . }}-analytics
+  minReplicas: {{ .Values.analytics.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.analytics.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.analytics.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.analytics.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.analytics.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.analytics.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

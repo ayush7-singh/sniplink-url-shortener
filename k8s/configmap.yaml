@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sniplink-config
+  namespace: sniplink
+  labels:
+    app.kubernetes.io/name: sniplink
+data:
+  PORT_SHORTENER: "3001"
+  PORT_ANALYTICS: "3002"
+  PGHOST: "postgres"
+  PGPORT: "5432"
+  PGDATABASE: "urlshortener"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_URL: "redis://redis:6379"
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  BASE_URL: "http://localhost"

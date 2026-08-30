@@ -1,0 +1,152 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Stage 1: Automated Testing of Microservices ──
+  test-microservices:
+    name: Test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [shortener, analytics]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Unit Tests
+        run: npm test
+
+  # ── Stage 2: Frontend Compilation & Asset Bundling ──
+  build-frontend:
+    name: Build Frontend (React SPA)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build React Assets
+        run: npm run build
+
+  # ── Stage 3: Kubernetes Manifests & Helm Chart Validation ──
+  validate-kubernetes:
+    name: Lint K8s & Helm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Install Kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Lint Helm Chart
+        run: helm lint helm/sniplink
+
+      - name: Validate Declarative Manifests with Kustomize
+        run: kubectl kustomize k8s/ > /dev/null
+
+  # ── Stage 4: Container Build & Layer Caching ──
+  docker-build:
+    name: Build Docker (${{ matrix.component }})
+    needs: [test-microservices, build-frontend, validate-kubernetes]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - component: shortener
+            context: ./services/shortener
+            image: sniplink-shortener
+          - component: analytics
+            context: ./services/analytics
+            image: sniplink-analytics
+          - component: frontend
+            context: ./frontend
+            image: sniplink-frontend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Stage 5: Helm Chart Packaging ──
+  package-helm:
+    name: Package Helm Chart
+    needs: [docker-build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Package Helm Chart
+        run: |
+          mkdir -p dist-helm
+          helm package helm/sniplink -d dist-helm
+
+      - name: Upload Helm Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniplink-helm-chart
+          path: dist-helm/*.tgz

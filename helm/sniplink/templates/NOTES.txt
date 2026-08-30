@@ -1,0 +1,22 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your SnipLink Cloud-Native URL Shortener deployment is being provisioned.
+
+1. Get the application status:
+   kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/instance={{ .Release.Name }}"
+
+2. Check Ingress status:
+   kubectl get ingress --namespace {{ .Release.Namespace }}
+
+3. Port forward directly (if Ingress Controller is not configured):
+   # Frontend Dashboard:
+   kubectl port-forward svc/{{ include "sniplink.fullname" . }}-frontend 5173:80 --namespace {{ .Release.Namespace }}
+
+   # Shortener API:
+   kubectl port-forward svc/{{ include "sniplink.fullname" . }}-shortener 3001:3001 --namespace {{ .Release.Namespace }}
+
+   # Analytics API:
+   kubectl port-forward svc/{{ include "sniplink.fullname" . }}-analytics 3002:3002 --namespace {{ .Release.Namespace }}
+
+4. Monitor Horizontal Pod Autoscalers (HPA):
+   kubectl get hpa --namespace {{ .Release.Namespace }}
